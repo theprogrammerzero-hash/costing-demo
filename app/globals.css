@@ -2,26 +2,75 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --paper: #ffffff;
+    --ink: #000000;
+    --ink-muted: #666666;
+    --ink-subtle: #999999;
+    --line: #e5e5e5;
+    --line-strong: #cccccc;
+    --neg: #c00000;
+    --pos: #0a6640;
   }
+
+  * { border-color: var(--line); box-sizing: border-box; }
+
+  html, body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  body { font-feature-settings: "tnum" 1, "ss01" 1; }
+
+  h1 { font-size: 22px; font-weight: 500; line-height: 1.2; letter-spacing: -0.01em; }
+  h2 { font-size: 17px; font-weight: 500; line-height: 1.3; letter-spacing: -0.01em; }
+  h3 { font-size: 14px; font-weight: 500; }
+
+  ::selection { background: var(--ink); color: var(--paper); }
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  .card { @apply border border-line bg-paper; }
+
+  .btn {
+    @apply inline-flex items-center justify-center border border-ink bg-paper px-3 py-1.5
+           text-[13px] font-medium text-ink transition-colors
+           hover:bg-ink hover:text-paper disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-primary { @apply bg-ink text-paper hover:bg-paper hover:text-ink; }
+  .btn-ghost   { @apply border-transparent hover:bg-line/40 hover:text-ink; }
+  .btn-sm      { @apply px-2 py-1 text-xs; }
+  .btn-danger  { @apply border-accent-neg text-accent-neg hover:bg-accent-neg hover:text-paper; }
+
+  .input { @apply h-9 w-full border-0 border-b border-line bg-transparent px-0 text-sm text-ink placeholder:text-ink-subtle focus:border-ink focus:outline-none focus:ring-0; }
+  .input-bordered { @apply border border-line px-3 py-1.5 focus:border-ink; }
+
+  .table-zebra { @apply w-full text-[13px]; }
+  .table-zebra thead th { @apply border-b border-ink py-2 px-3 text-left font-medium text-xxs uppercase tracking-wider text-ink-muted; }
+  .table-zebra tbody td { @apply border-b border-line py-2.5 px-3 align-middle; }
+  .table-zebra tbody tr:hover { @apply bg-line/30; }
+
+  .num     { @apply font-mono tabular-nums text-right; }
+  .num-pos { @apply text-accent-pos; }
+  .num-neg { @apply text-accent-neg; }
+
+  .pill { @apply inline-flex items-center border border-line px-2 py-0.5 text-xxs uppercase tracking-wider text-ink-muted; }
+
+  .nav-section  { @apply px-4 pt-5 pb-1 text-xxs uppercase tracking-wider text-ink-subtle; }
+  .nav-link     { @apply flex items-center px-4 py-1.5 text-[13px] text-ink-muted transition-colors hover:bg-line/30 hover:text-ink; }
+  .nav-link-active { @apply bg-ink text-paper hover:bg-ink hover:text-paper; }
+
+  .kpi       { @apply border border-line p-5; }
+  .kpi-label { @apply text-xxs uppercase tracking-wider text-ink-muted; }
+  .kpi-value { @apply mt-2 font-mono tabular-nums text-2xl text-ink; }
+  .kpi-delta { @apply mt-1 text-xs text-ink-muted; }
 }
 
-@layer utilities {
-  .text-balance {
-    text-wrap: balance;
-  }
-}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); }
+::-webkit-scrollbar-track { background: transparent; }

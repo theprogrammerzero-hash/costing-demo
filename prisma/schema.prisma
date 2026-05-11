@@ -1,0 +1,122 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Reparto {
+  id                String   @id @default(cuid())
+  codice            String   @unique
+  nome              String
+  tariffaVarMacchina Float   @default(0)   // €/ora — altri variabili: consumabili, utensili (NO energia)
+  tariffaMdo        Float    @default(0)   // €/ora — manodopera diretta (già variabile)
+  oreCapacitaAnnua  Float    @default(0)   // ore macchina disponibili/anno (0 = fallback proporzionale)
+  kWInstallata      Float    @default(0)   // kW potenza installata macchina (0 = non configurato)
+  prezzoEnergia     Float    @default(0)   // €/kWh tariffa energia attiva
+  createdAt         DateTime @default(now())
+
+  lavorazioni    LavorazioneReparto[]
+  voceCostiFissi VoceCostoFisso[]
+  macchine       Macchina[]
+}
+
+// ── Macchine ─────────────────────────────────────────────────────────────────
+model Macchina {
+  id                String  @id @default(cuid())
+  repartoId         String
+  codice            String  @unique
+  nome              String
+  tipoOperazione    String            // es. "LAVORAZIONE_CNC", "ASSEMBLAGGIO", "COLLAUDO"
+  capacitaMinGiorno Float   @default(480)  // minuti disponibili per turno (8h = 480)
+  tempoSetupMin     Float   @default(0)    // minuti di setup per cambio produzione
+
+  reparto           Reparto           @relation(fields: [repartoId], references: [id], onDelete: Cascade)
+  operazioniCiclo   OperazioneCiclo[]
+}
+
+// ── Dipendenti ────────────────────────────────────────────────────────────────
+model Dipendente {
+  id             String            @id @default(cuid())
+  nome           String
+  matricola      String            @unique
+  efficienzaPerc Float             @default(100)  // % rispetto allo standard (100 = standard)
+  costoOrario    Float             @default(0)    // €/ora manodopera diretta
+
+  skills         SkillDipendente[]
+}
+
+model SkillDipendente {
+  id             String     @id @default(cuid())
+  dipendenteId   String
+  tipoOperazione String     // deve corrispondere a Macchina.tipoOperazione
+
+  dipendente     Dipendente @relation(fields: [dipendenteId], references: [id], onDelete: Cascade)
+
+  @@unique([dipendenteId, tipoOperazione])
+}
+
+// ── Ciclo di lavorazione (scheda tempi / routing) ─────────────────────────────
+model OperazioneCiclo {
+  id             String    @id @default(cuid())
+  prodottoId     String
+  sequenza       Int                   // ordine esecuzione (1, 2, 3…)
+  nome           String                // es. "Fresatura profili"
+  tipoOperazione String                // tipo macchina richiesta
+  tempoStdMin    Float     @default(0) // SAM — Standard Allowed Minutes per unità
+  tempoSetupMin  Float     @default(0) // minuti setup per cambio commessa
+  macchinaId     String?               // macchina specifica (null = qualsiasi del tipo)
+
+  prodotto       Prodotto  @relation(fields: [prodottoId], references: [id], onDelete: Cascade)
+  macchina       Macchina? @relation(fields: [macchinaId], references: [id], onDelete: SetNull)
+
+  @@unique([prodottoId, sequenza])
+}
+
+model VoceCostoFisso {
+  id        String @id @default(cuid())
+  repartoId String
+  nome      String
+  importo   Float  @default(0)   // €/anno
+
+  reparto Reparto @relation(fields: [repartoId], references: [id], onDelete: Cascade)
+}
+
+model Prodotto {
+  id            String    @id @default(cuid())
+  codice        String    @unique
+  nome          String
+  cliente       String?                       // ragione sociale / nome cliente
+  quantita      Float     @default(1)         // unità totali della commessa
+  dataInizio    DateTime?                     // data inizio lavorazione
+  dataFine      DateTime?                     // data consegna prevista
+  prezzoVendita Float?
+  materiePrime  Float     @default(0)
+  createdAt     DateTime  @default(now())
+
+  lavorazioni     LavorazioneReparto[]
+  operazioniCiclo OperazioneCiclo[]
+}
+
+model LavorazioneReparto {
+  id          String @id @default(cuid())
+  prodottoId  String
+  repartoId   String
+  oreMacchina Float  @default(0)
+  oreMdo      Float  @default(0)
+
+  prodotto Prodotto @relation(fields: [prodottoId], references: [id], onDelete: Cascade)
+  reparto  Reparto  @relation(fields: [repartoId],  references: [id], onDelete: Cascade)
+
+  @@unique([prodottoId, repartoId])
+}
+
+model Configurazione {
+  id           String @id @default("main")
+  percAmmComm  Float  @default(15)             // usato quando ammCommTipo = "PERC"
+  ammCommTipo  String @default("PERC")         // "PERC" | "VALORE"
+  ammCommValore Float @default(0)              // €/anno totali, usato quando ammCommTipo = "VALORE"
+  baseRiparto  String @default("ORE_MACCHINA") // ORE_MACCHINA | ORE_MOD | COSTO_DIRETTO
+}

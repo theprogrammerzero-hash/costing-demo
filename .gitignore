@@ -34,3 +34,10 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/app/generated/prisma
+
+# local SQLite database (never commit the DB file)
+*.db
+*.db-shm
+*.db-wal
