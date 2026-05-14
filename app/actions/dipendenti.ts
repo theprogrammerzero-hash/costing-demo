@@ -40,12 +40,12 @@ export async function deleteDipendente(id: string) {
 }
 
 export async function addSkill(dipendenteId: string, formData: FormData) {
-  const tipoOperazione = f(formData, "tipoOperazione").toUpperCase().replace(/\s+/g, "_");
-  if (!tipoOperazione) return;
+  const repartoId = f(formData, "repartoId");
+  if (!repartoId) return;
   // ignora duplicati
   await prisma.skillDipendente.upsert({
-    where: { dipendenteId_tipoOperazione: { dipendenteId, tipoOperazione } },
-    create: { dipendenteId, tipoOperazione },
+    where: { dipendenteId_repartoId: { dipendenteId, repartoId } },
+    create: { dipendenteId, repartoId },
     update: {},
   });
   revalidatePath("/dipendenti");

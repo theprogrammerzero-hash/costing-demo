@@ -9,24 +9,23 @@ const fmtEur = (n: number) =>
 const fmtPerc = (n: number | null) => (n != null ? `${n.toFixed(1)}%` : "—");
 
 export default async function DashboardPage() {
-  const [reparti, prodotti, lavorazioni, config] = await Promise.all([
+  const [reparti, prodotti, fasi, config] = await Promise.all([
     prisma.reparto.findMany({ orderBy: { codice: "asc" }, include: { voceCostiFissi: true } }),
     prisma.prodotto.findMany({ orderBy: { codice: "asc" } }),
-    prisma.lavorazioneReparto.findMany(),
+    prisma.faseLavorazione.findMany(),
     prisma.configurazione.findUnique({ where: { id: "main" } }),
   ]);
 
   const percAmmComm = config?.percAmmComm ?? 15;
   const baseRiparto = config?.baseRiparto ?? "ORE_MACCHINA";
 
-  const hasData = prodotti.length > 0 && reparti.length > 0 && lavorazioni.length > 0;
+  const hasData = prodotti.length > 0 && reparti.length > 0 && fasi.length > 0;
 
   const { risultati, idleCapacity } = hasData
-    ? calcDemoFullCosting(reparti, prodotti, lavorazioni, percAmmComm, baseRiparto)
+    ? calcDemoFullCosting(reparti, prodotti, fasi, percAmmComm, baseRiparto)
     : { risultati: [], idleCapacity: [] };
   const totIdleAnnuo = idleCapacity.reduce((s, r) => s + r.costoIdleAnnuo, 0);
 
-  // KPI aggregati
   const ricaviTotali = risultati.reduce(
     (s, r) => s + (r.prodotto.prezzoVendita ?? 0) * r.prodotto.quantita,
     0,
@@ -44,7 +43,7 @@ export default async function DashboardPage() {
     <div>
       <PageHeader
         title="Dashboard"
-        subtitle="Riepilogo full costing — dati acquisiti dal sistema IoT"
+        subtitle="Riepilogo full costing commesse attive"
         actions={
           hasData ? (
             <Link href="/risultati" className="btn btn-primary">
@@ -78,7 +77,7 @@ export default async function DashboardPage() {
           <Kpi
             label="CF struttura annui"
             value={fmtEur(reparti.reduce((s, r) => s + r.voceCostiFissi.reduce((vs, v) => vs + v.importo, 0), 0))}
-            delta={`ammort. · stipendi fissi · affitti`}
+            delta="ammort. · stipendi fissi · affitti"
           />
           <Kpi
             label="Capacità non utilizzata"
@@ -147,7 +146,6 @@ export default async function DashboardPage() {
             </div>
           </div>
         ) : (
-          /* Setup guide se non ci sono dati */
           <div className="border border-line p-6 max-w-lg space-y-4">
             <h2>Inizia qui</h2>
             <p className="text-sm text-ink-muted">
@@ -159,9 +157,9 @@ export default async function DashboardPage() {
                 { n: 2, label: "Inserisci le commesse", href: "/prodotti", done: prodotti.length > 0 },
                 {
                   n: 3,
-                  label: "Configura i tempi di lavorazione",
-                  href: "/tempi",
-                  done: lavorazioni.length > 0,
+                  label: "Configura le fasi di lavorazione",
+                  href: "/fasi",
+                  done: fasi.length > 0,
                 },
                 { n: 4, label: "Visualizza i risultati", href: "/risultati", done: false },
               ].map((step) => (

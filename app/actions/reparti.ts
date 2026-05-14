@@ -11,7 +11,6 @@ export async function createReparto(formData: FormData) {
     data: {
       codice: f(formData, "codice"),
       nome: f(formData, "nome"),
-      tariffaVarMacchina: fNum(formData, "tariffaVarMacchina"),
       tariffaMdo: fNum(formData, "tariffaMdo"),
       oreCapacitaAnnua: fNum(formData, "oreCapacitaAnnua"),
       kWInstallata: fNum(formData, "kWInstallata"),
@@ -28,7 +27,6 @@ export async function updateReparto(id: string, formData: FormData) {
     data: {
       codice: f(formData, "codice"),
       nome: f(formData, "nome"),
-      tariffaVarMacchina: fNum(formData, "tariffaVarMacchina"),
       tariffaMdo: fNum(formData, "tariffaMdo"),
       oreCapacitaAnnua: fNum(formData, "oreCapacitaAnnua"),
       kWInstallata: fNum(formData, "kWInstallata"),

@@ -8,12 +8,11 @@ const nav = [
   { section: "Anagrafica", items: [
     { label: "Reparti", href: "/reparti" },
     { label: "Commesse", href: "/prodotti" },
-    { label: "Tempi di lavorazione", href: "/tempi" },
+    { label: "Fasi di lavorazione", href: "/fasi" },
   ]},
   { section: "Produzione", items: [
     { label: "Macchine", href: "/macchine" },
     { label: "Dipendenti", href: "/dipendenti" },
-    { label: "Ciclo di lavorazione", href: "/ciclo" },
     { label: "Metodi & Tempi", href: "/metodi-tempi" },
   ]},
   { section: "Analisi", items: [

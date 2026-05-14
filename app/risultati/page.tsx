@@ -10,10 +10,10 @@ const fmtPerc = (n: number | null) =>
   n != null ? `${n.toFixed(1)}%` : "—";
 
 export default async function RisultatiPage() {
-  const [reparti, prodotti, lavorazioni, config] = await Promise.all([
+  const [reparti, prodotti, fasi, config] = await Promise.all([
     prisma.reparto.findMany({ orderBy: { codice: "asc" }, include: { voceCostiFissi: true } }),
     prisma.prodotto.findMany({ orderBy: { codice: "asc" } }),
-    prisma.lavorazioneReparto.findMany(),
+    prisma.faseLavorazione.findMany({ orderBy: [{ prodottoId: "asc" }, { sequenza: "asc" }] }),
     prisma.configurazione.findUnique({ where: { id: "main" } }),
   ]);
 
@@ -30,7 +30,7 @@ export default async function RisultatiPage() {
           subtitle="Full costing e analisi del punto di pareggio"
         />
         <div className="px-8 py-12 text-ink-muted">
-          Inserisci almeno un reparto e un prodotto con i tempi di lavorazione per avviare il calcolo.
+          Inserisci almeno un reparto e un prodotto con le fasi di lavorazione per avviare il calcolo.
         </div>
       </div>
     );
@@ -39,7 +39,7 @@ export default async function RisultatiPage() {
   const { risultati, idleCapacity } = calcDemoFullCosting(
     reparti,
     prodotti,
-    lavorazioni,
+    fasi,
     percAmmComm,
     baseRiparto,
     ammCommTipo,
@@ -152,33 +152,26 @@ export default async function RisultatiPage() {
                   </div>
                   <table className="w-full text-xs">
                     <tbody>
-                      {/* Dettaglio reparti */}
-                      {r.dettaglioReparti.filter(d => d.oreMacchina > 0 || d.oreMdo > 0).map((d) => {
-                        const hasEnergia = d.reparto.kWInstallata > 0 && d.reparto.prezzoEnergia > 0;
-                        const tariffaEnergiaH = d.reparto.kWInstallata * d.reparto.prezzoEnergia;
+                      {/* Dettaglio per fase */}
+                      {r.dettaglioFasi.map((f) => {
+                        const totFase = f.costoEnergiaUnit + f.costoMdoUnit;
+                        const repartoInfo = r.dettaglioReparti.find(
+                          (d) => d.reparto.nome === f.repartoNome
+                        );
+                        const kWh = repartoInfo
+                          ? repartoInfo.reparto.kWInstallata * repartoInfo.reparto.prezzoEnergia
+                          : 0;
                         return (
-                          <tr key={d.reparto.id} className="border-b border-line/50">
+                          <tr key={f.faseId} className="border-b border-line/40">
                             <td className="px-4 py-1.5 text-ink-muted pl-6">
-                              {d.reparto.nome}
+                              <span className="font-medium text-ink">{f.nome}</span>
+                              <span className="ml-1 text-ink-subtle">· {f.repartoNome}</span>
                             </td>
-                            <td className="px-3 py-1.5 text-ink-muted">
-                              {hasEnergia ? (
-                                <>
-                                  M {d.oreMacchina.toFixed(2)}h × [⚡{fmtEur(tariffaEnergiaH)} + cons.{fmtEur(d.reparto.tariffaVarMacchina)}]
-                                  {" + "}
-                                  MdO {d.oreMdo.toFixed(2)}h × {fmtEur(d.reparto.tariffaMdo)}
-                                </>
-                              ) : (
-                                <>
-                                  M {d.oreMacchina.toFixed(2)}h × {fmtEur(d.reparto.tariffaVarMacchina)}(var.)
-                                  {" + "}
-                                  MdO {d.oreMdo.toFixed(2)}h × {fmtEur(d.reparto.tariffaMdo)}
-                                </>
-                              )}
+                            <td className="px-3 py-1.5 text-ink-subtle">
+                              {f.tempoOre.toFixed(2)}h
+                              {kWh > 0 && ` × (⚡${fmtEur(kWh)} + MdO ${fmtEur(repartoInfo!.reparto.tariffaMdo)})`}
                             </td>
-                            <td className="px-3 py-1.5 num">
-                              {fmtEur(d.costoVarMacchinaUnit + d.costoMdoUnit)}
-                            </td>
+                            <td className="px-3 py-1.5 num">{fmtEur(totFase)}</td>
                           </tr>
                         );
                       })}
@@ -208,7 +201,7 @@ export default async function RisultatiPage() {
                         <td className="px-4 py-1.5 text-ink-muted pl-6">
                           Costi amm.vi/comm.li{" "}
                           {ammCommTipo === "VALORE" && r.tariffaAmmCommOre > 0
-                            ? `(€${r.tariffaAmmCommOre.toFixed(2)}/h × ${r.oreMacchinaUnitTot.toFixed(2)}h = ${r.percAmmCommEffettiva.toFixed(1)}% c.ind.)`
+                            ? `(€${r.tariffaAmmCommOre.toFixed(2)}/h × ${r.oreFasiUnitTot.toFixed(2)}h = ${r.percAmmCommEffettiva.toFixed(1)}% c.ind.)`
                             : `(${r.percAmmCommEffettiva.toFixed(1)}% × ${fmtEur(r.costoIndustrialeUnit)})`
                           }
                         </td>
@@ -310,7 +303,7 @@ export default async function RisultatiPage() {
           </div>
         )}
 
-        {/* ── Footer IoT note ───────────────────────────────────── */}
+        {/* ── Footer ───────────────────────────────────────────── */}
         <div className="mt-10 border-t border-line pt-6 text-xs text-ink-muted flex gap-6">
           <div>
             <span className="uppercase tracking-wider">Base riparto:</span>{" "}

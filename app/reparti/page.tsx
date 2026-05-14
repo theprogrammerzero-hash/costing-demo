@@ -28,12 +28,11 @@ export default async function RepartiPage() {
     <div>
       <PageHeader
         title="Reparti"
-        subtitle="Centri di costo produttivi — tariffe variabili orarie e costi fissi annui"
+        subtitle="Centri di costo produttivi — tariffe orarie e costi fissi annui"
       />
 
       <div className="px-8 py-6 space-y-10">
 
-        {/* ── Reparti esistenti ─────────────────────────────────────────── */}
         {reparti.map((r) => {
           const cfReparto = r.voceCostiFissi.reduce((s, v) => s + v.importo, 0);
           return (
@@ -57,10 +56,6 @@ export default async function RepartiPage() {
                     </span>
                   )}
                   <span className="text-ink-muted">
-                    Consumabili:{" "}
-                    <span className="num text-ink font-medium">{fmt(r.tariffaVarMacchina)}/h</span>
-                  </span>
-                  <span className="text-ink-muted">
                     Tariffa MdO:{" "}
                     <span className="num text-ink font-medium">{fmt(r.tariffaMdo)}/h</span>
                   </span>
@@ -79,7 +74,6 @@ export default async function RepartiPage() {
                       </span>
                     </span>
                   )}
-                  {/* Modifica tariffe */}
                   <details className="inline-block relative">
                     <summary className="btn btn-sm btn-ghost cursor-pointer list-none">Modifica tariffe</summary>
                     <div className="absolute right-0 z-10 mt-1 w-72 border border-line bg-paper shadow-lg p-4">
@@ -94,15 +88,9 @@ export default async function RepartiPage() {
                             <input name="nome" defaultValue={r.nome} className="input mt-1" />
                           </div>
                         </div>
-                        <div className="grid grid-cols-2 gap-3">
-                          <div>
-                            <label className="text-xxs uppercase tracking-wider text-ink-muted">Consumabili €/h</label>
-                            <input name="tariffaVarMacchina" type="number" step="0.01" defaultValue={r.tariffaVarMacchina} className="input mt-1" />
-                          </div>
-                          <div>
-                            <label className="text-xxs uppercase tracking-wider text-ink-muted">€/h MdO</label>
-                            <input name="tariffaMdo" type="number" step="0.01" defaultValue={r.tariffaMdo} className="input mt-1" />
-                          </div>
+                        <div>
+                          <label className="text-xxs uppercase tracking-wider text-ink-muted">€/h MdO diretta</label>
+                          <input name="tariffaMdo" type="number" step="0.01" defaultValue={r.tariffaMdo} className="input mt-1" />
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <div>
@@ -116,7 +104,7 @@ export default async function RepartiPage() {
                         </div>
                         <div>
                           <label className="text-xxs uppercase tracking-wider text-ink-muted">
-                            Capacità (ore macchina/anno)
+                            Capacità (ore/anno)
                           </label>
                           <input name="oreCapacitaAnnua" type="number" step="100" min="0" defaultValue={r.oreCapacitaAnnua} className="input mt-1" />
                         </div>
@@ -132,7 +120,7 @@ export default async function RepartiPage() {
                 </div>
               </div>
 
-              {/* Sezione Costi Fissi Annui */}
+              {/* Costi Fissi Annui */}
               <div className="px-5 py-4">
                 <div className="flex items-center justify-between mb-3">
                   <h3 className="text-xs uppercase tracking-wider text-ink-muted">
@@ -168,16 +156,12 @@ export default async function RepartiPage() {
                   <p className="text-xs text-ink-subtle mb-3">Nessuna voce inserita.</p>
                 )}
 
-                {/* Form aggiunta voce CF */}
-                <form
-                  action={addVoceCostoFisso.bind(null, r.id)}
-                  className="flex gap-2 items-end"
-                >
+                <form action={addVoceCostoFisso.bind(null, r.id)} className="flex gap-2 items-end">
                   <div className="flex-1">
                     <label className="text-xxs uppercase tracking-wider text-ink-muted">Descrizione voce</label>
                     <input
                       name="nome"
-                      placeholder="es. Ammortamento CNC"
+                      placeholder="es. Ammortamento macchina"
                       className="input mt-1 text-sm"
                       required
                     />
@@ -206,27 +190,20 @@ export default async function RepartiPage() {
                   <>
                     <span className="font-medium text-ink-muted">⚡ energia:</span>{" "}
                     {r.kWInstallata}kW × {fmt(r.prezzoEnergia)}/kWh = {fmt(r.kWInstallata * r.prezzoEnergia)}/h ·{" "}
-                    <span className="font-medium text-ink-muted">consumabili:</span>{" "}
-                    {fmt(r.tariffaVarMacchina)}/h ·{" "}
-                    <span className="font-medium text-ink-muted">cv totale macchina:</span>{" "}
-                    {fmt(r.kWInstallata * r.prezzoEnergia + r.tariffaVarMacchina)}/h ·{" "}
                   </>
-                ) : (
-                  <>
-                    <span className="font-medium text-ink-muted">cv macchina:</span>{" "}
-                    {fmt(r.tariffaVarMacchina)}/h ·{" "}
-                  </>
-                )}
+                ) : null}
                 <span className="font-medium text-ink-muted">cv MdO:</span>{" "}
                 {fmt(r.tariffaMdo)}/h ·{" "}
                 <span className="font-medium text-ink-muted">CF totali:</span>{" "}
-                {fmt(cfReparto)}/anno → ripartiti sui prodotti in proporzione alle ore macchina
+                {fmt(cfReparto)}/anno
+                {r.oreCapacitaAnnua > 0 && cfReparto > 0 && (
+                  <> → tariffa CF: {fmt(cfReparto / r.oreCapacitaAnnua)}/h (predeterminata a capacità)</>
+                )}
               </div>
             </div>
           );
         })}
 
-        {/* ── Totale CF struttura ───────────────────────────────────────── */}
         {reparti.length > 0 && (
           <div className="flex items-center justify-between border-t border-line pt-4 max-w-2xl">
             <span className="text-sm text-ink-muted">{reparti.length} reparti — CF struttura totali annui</span>
@@ -234,12 +211,11 @@ export default async function RepartiPage() {
           </div>
         )}
 
-        {/* ── Nuovo reparto ─────────────────────────────────────────────── */}
+        {/* Nuovo reparto */}
         <div className="border border-line p-6 max-w-lg">
           <h2 className="mb-1">Nuovo reparto</h2>
           <p className="text-xs text-ink-muted mb-4">
-            Inserisci solo le <strong>tariffe variabili</strong> (energia, consumabili per ora).
-            I costi fissi si aggiungono con il pulsante "Aggiungi" dopo aver creato il reparto.
+            Inserisci tariffa MdO ed energia. I costi fissi si aggiungono dopo aver creato il reparto.
           </p>
           <form action={createReparto} className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
@@ -252,18 +228,9 @@ export default async function RepartiPage() {
                 <input name="nome" placeholder="Nome reparto" className="input mt-1" required />
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-xxs uppercase tracking-wider text-ink-muted">
-                  Consumabili/utensili (€/h)
-                  <span className="block normal-case text-ink-subtle">escludi energia — calcolata da kW</span>
-                </label>
-                <input name="tariffaVarMacchina" type="number" step="0.01" min="0" placeholder="0.00" className="input mt-1" />
-              </div>
-              <div>
-                <label className="text-xxs uppercase tracking-wider text-ink-muted">Tariffa MdO (€/h)</label>
-                <input name="tariffaMdo" type="number" step="0.01" min="0" placeholder="0.00" className="input mt-1" />
-              </div>
+            <div>
+              <label className="text-xxs uppercase tracking-wider text-ink-muted">Tariffa MdO (€/h)</label>
+              <input name="tariffaMdo" type="number" step="0.01" min="0" placeholder="0.00" className="input mt-1" />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div>
@@ -282,26 +249,15 @@ export default async function RepartiPage() {
             </div>
             <div>
               <label className="text-xxs uppercase tracking-wider text-ink-muted">
-                Capacità disponibile (ore macchina/anno)
+                Capacità disponibile (ore/anno)
                 <span className="block normal-case text-ink-subtle">
-                  usata per la tariffa CF predeterminata — lasciare 0 per allocazione proporzionale
+                  usata per la tariffa CF predeterminata
                 </span>
               </label>
               <input name="oreCapacitaAnnua" type="number" step="100" min="0" placeholder="es. 2000" className="input mt-1" />
             </div>
             <button type="submit" className="btn btn-primary">Aggiungi reparto</button>
           </form>
-        </div>
-
-        {/* ── Nota IoT ──────────────────────────────────────────────────── */}
-        <div className="border-l-2 border-ink pl-4 text-sm text-ink-muted max-w-xl">
-          <p className="font-medium text-ink">Integrazione IoT</p>
-          <p className="mt-1">
-            Le tariffe e i costi fissi vengono inseriti una volta. I{" "}
-            <strong>tempi di lavorazione</strong> (ore macchina + ore manodopera per prodotto)
-            vengono acquisiti in tempo reale dai sensori Arduino/PLC tramite{" "}
-            <code className="text-xs bg-line px-1">POST /api/v1/lavorazioni</code>.
-          </p>
         </div>
       </div>
     </div>

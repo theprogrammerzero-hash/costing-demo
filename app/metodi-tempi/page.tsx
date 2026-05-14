@@ -3,8 +3,6 @@ import { PageHeader } from "@/components/ui/PageHeader";
 
 const fmtEur = (n: number) =>
   new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" }).format(n);
-const fmtMin = (m: number) =>
-  m >= 60 ? `${Math.floor(m / 60)}h ${(m % 60).toFixed(0)}min` : `${m.toFixed(1)}min`;
 
 function giorniLavorativi(inizio: Date | null, fine: Date | null): number | null {
   if (!inizio || !fine) return null;
@@ -18,9 +16,9 @@ export default async function MetodiTempiPage() {
     prisma.prodotto.findMany({
       orderBy: { codice: "asc" },
       include: {
-        operazioniCiclo: {
+        fasi: {
           orderBy: { sequenza: "asc" },
-          include: { macchina: { include: { reparto: true } } },
+          include: { reparto: true, macchina: true },
         },
       },
     }),
@@ -28,77 +26,78 @@ export default async function MetodiTempiPage() {
       orderBy: { matricola: "asc" },
       include: { skills: true },
     }),
-    prisma.macchina.findMany({
-      include: { reparto: true },
-    }),
+    prisma.macchina.findMany({ include: { reparto: true } }),
   ]);
 
-  // ── Helper: migliore operatore per tipo operazione ─────────────────
-  function bestOperator(tipoOp: string) {
-    const qualified = dipendenti
-      .filter((d) => d.skills.some((s) => s.tipoOperazione === tipoOp))
+  // Helper: operatori qualificati per un reparto
+  function operatoriPerReparto(repartoId: string) {
+    return dipendenti
+      .filter((d) => d.skills.some((s) => s.repartoId === repartoId))
       .sort((a, b) => b.efficienzaPerc - a.efficienzaPerc);
-    return qualified.length > 0 ? qualified : null;
   }
 
-  // ── Carico macchine: ore necessarie per commessa ─────────────────────
-  // macchinaId → { minNecessari, commesse[] }
+  // Mappa macchine per lookup veloce (include reparto)
+  const macchinaById = new Map(macchine.map((m) => [m.id, m]));
+
+  // Carico macchine: macchinaId → { minNecessari (= ore × 60), commesse[] }
   type CaricoEntry = { macchina: typeof macchine[0]; minNecessari: number; commesse: string[] };
   const caricoMap = new Map<string, CaricoEntry>();
   for (const p of prodotti) {
-    for (const op of p.operazioniCiclo) {
-      if (!op.macchinaId || !op.macchina) continue;
-      const entry = caricoMap.get(op.macchinaId) ?? {
-        macchina: op.macchina,
+    for (const f of p.fasi) {
+      if (!f.macchinaId) continue;
+      const mac = macchinaById.get(f.macchinaId);
+      if (!mac) continue;
+      const entry = caricoMap.get(f.macchinaId) ?? {
+        macchina: mac,
         minNecessari: 0,
         commesse: [],
       };
-      entry.minNecessari += op.tempoStdMin * p.quantita;
+      entry.minNecessari += f.tempoOre * 60 * p.quantita;
       if (!entry.commesse.includes(p.codice)) entry.commesse.push(p.codice);
-      caricoMap.set(op.macchinaId, entry);
+      caricoMap.set(f.macchinaId, entry);
     }
   }
 
-  // Minuti disponibili per macchina sull'anno (250 giorni lav.)
   const minDisponibiliAnno = (mac: typeof macchine[0]) => mac.capacitaMinGiorno * 250;
 
-  // ── Copertura skill ──────────────────────────────────────────────────
-  const tipiRichiesti = Array.from(
-    new Set(prodotti.flatMap((p) => p.operazioniCiclo.map((o) => o.tipoOperazione))),
-  ).sort();
+  // Reparti richiesti dalle fasi
+  const repartiRichiesti = await prisma.reparto.findMany({
+    where: { id: { in: Array.from(new Set(prodotti.flatMap((p) => p.fasi.map((f) => f.repartoId)))) } },
+    orderBy: { codice: "asc" },
+  });
 
   return (
     <div>
       <PageHeader
         title="Metodi & Tempi — Analisi"
-        subtitle="Assegnazione ottimale operatori · carico macchine · copertura skill"
+        subtitle="Assegnazione ottimale operatori · carico macchine · copertura skill per reparto"
       />
 
       <div className="px-8 py-6 space-y-10">
 
-        {/* ══ PER COMMESSA: assegnazione e costo MdO ═══════════════════ */}
+        {/* ══ PER COMMESSA ═══════════════════════════════════════════════ */}
         {prodotti.map((p) => {
-          const ops = p.operazioniCiclo;
-          if (ops.length === 0) return null;
+          const fasi = p.fasi;
+          if (fasi.length === 0) return null;
 
           const gg = giorniLavorativi(p.dataInizio, p.dataFine);
           const taktTime = gg != null && p.quantita > 0 ? (gg * 480) / p.quantita : null;
-          const samTotale = ops.reduce((s, o) => s + o.tempoStdMin, 0);
+          const totOre = fasi.reduce((s, f) => s + f.tempoOre, 0);
 
-          // Costo MdO totale per unità (usando operatore consigliato)
+          // Costo MdO per unità (usando operatore consigliato per reparto)
           let costoMdoTotUnit = 0;
-          const righe = ops.map((op) => {
-            const candidati = bestOperator(op.tipoOperazione);
-            const best = candidati?.[0] ?? null;
+          const righe = fasi.map((f) => {
+            const candidati = operatoriPerReparto(f.repartoId);
+            const best = candidati[0] ?? null;
             const tempoEff = best
-              ? op.tempoStdMin / (best.efficienzaPerc / 100)
-              : op.tempoStdMin;
+              ? f.tempoOre / (best.efficienzaPerc / 100)
+              : f.tempoOre;
             const costoUnit = best && best.costoOrario > 0
-              ? (tempoEff / 60) * best.costoOrario
+              ? tempoEff * best.costoOrario
               : null;
             if (costoUnit != null) costoMdoTotUnit += costoUnit;
-            const noCopertura = !candidati || candidati.length === 0;
-            return { op, best, candidati, tempoEff, costoUnit, noCopertura };
+            const noCopertura = candidati.length === 0;
+            return { f, best, candidati, tempoEff, costoUnit, noCopertura };
           });
 
           return (
@@ -112,14 +111,14 @@ export default async function MetodiTempiPage() {
                 </div>
                 <div className="flex items-center gap-5 text-sm">
                   <div className="text-right">
-                    <div className="text-xxs uppercase tracking-wider text-ink-muted">SAM totale</div>
-                    <div className="num font-medium">{fmtMin(samTotale)}</div>
+                    <div className="text-xxs uppercase tracking-wider text-ink-muted">Ore tot./pz</div>
+                    <div className="num font-medium">{totOre.toFixed(2)}h</div>
                   </div>
                   {taktTime != null && (
                     <div className="text-right">
-                      <div className="text-xxs uppercase tracking-wider text-ink-muted">Takt</div>
-                      <div className={`num font-medium ${samTotale > taktTime ? "num-neg" : "num-pos"}`}>
-                        {fmtMin(taktTime)}/u
+                      <div className="text-xxs uppercase tracking-wider text-ink-muted">Takt time</div>
+                      <div className={`num font-medium ${totOre * 60 > taktTime ? "num-neg" : "num-pos"}`}>
+                        {taktTime.toFixed(0)}min/u
                       </div>
                     </div>
                   )}
@@ -129,38 +128,30 @@ export default async function MetodiTempiPage() {
                       <div className="num font-medium">{fmtEur(costoMdoTotUnit)}</div>
                     </div>
                   )}
-                  {costoMdoTotUnit > 0 && (
-                    <div className="text-right">
-                      <div className="text-xxs uppercase tracking-wider text-ink-muted">Costo MdO tot.</div>
-                      <div className="num font-medium">{fmtEur(costoMdoTotUnit * p.quantita)}</div>
-                    </div>
-                  )}
                 </div>
               </div>
 
-              {/* Tabella operazioni + assegnazione */}
+              {/* Tabella fasi + assegnazione */}
               <table className="w-full text-sm">
                 <thead className="border-b border-line">
                   <tr>
-                    <th className="px-3 py-2 text-left w-8">Seq.</th>
-                    <th className="px-3 py-2 text-left">Operazione</th>
-                    <th className="px-3 py-2 text-left">SAM std.</th>
+                    <th className="px-3 py-2 text-left w-8">#</th>
+                    <th className="px-3 py-2 text-left">Fase</th>
+                    <th className="px-3 py-2 text-left">Reparto</th>
+                    <th className="px-3 py-2 text-right">h/pz std.</th>
                     <th className="px-3 py-2 text-left">Operatore consigliato</th>
                     <th className="px-3 py-2 text-right">Eff.</th>
-                    <th className="px-3 py-2 text-right">Tempo eff.</th>
+                    <th className="px-3 py-2 text-right">h/pz eff.</th>
                     <th className="px-3 py-2 text-right">Costo MdO/u</th>
-                    <th className="px-3 py-2 text-left">Alternativa</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {righe.map(({ op, best, candidati, tempoEff, costoUnit, noCopertura }) => (
-                    <tr key={op.id} className={`border-b border-line/50 ${noCopertura ? "bg-accent-neg/5" : ""}`}>
-                      <td className="px-3 py-2 num text-ink-muted">{op.sequenza}</td>
-                      <td className="px-3 py-2">
-                        <div className="font-medium">{op.nome}</div>
-                        <div className="text-xxs font-mono text-ink-subtle">{op.tipoOperazione}</div>
-                      </td>
-                      <td className="px-3 py-2 num">{fmtMin(op.tempoStdMin)}</td>
+                  {righe.map(({ f, best, candidati, tempoEff, costoUnit, noCopertura }) => (
+                    <tr key={f.id} className={`border-b border-line/50 ${noCopertura ? "bg-accent-neg/5" : ""}`}>
+                      <td className="px-3 py-2 num text-ink-muted">{f.sequenza}</td>
+                      <td className="px-3 py-2 font-medium">{f.nome}</td>
+                      <td className="px-3 py-2 text-ink-muted text-xs">{f.reparto.nome}</td>
+                      <td className="px-3 py-2 num">{f.tempoOre.toFixed(2)}h</td>
                       <td className="px-3 py-2">
                         {noCopertura ? (
                           <span className="text-xs text-accent-neg font-medium">⚠ Nessun operatore qualificato</span>
@@ -177,27 +168,21 @@ export default async function MetodiTempiPage() {
                       </td>
                       <td className="px-3 py-2 num">
                         <span className={best && best.efficienzaPerc < 100 ? "num-neg" : ""}>
-                          {fmtMin(tempoEff)}
+                          {tempoEff.toFixed(2)}h
                         </span>
                       </td>
                       <td className="px-3 py-2 num">
                         {costoUnit != null ? fmtEur(costoUnit) : "—"}
                       </td>
-                      <td className="px-3 py-2 text-xs text-ink-muted">
-                        {candidati && candidati.length > 1
-                          ? candidati.slice(1, 3).map((c) => `${c.nome} (${c.efficienzaPerc}%)`).join(" · ")
-                          : "—"}
-                      </td>
                     </tr>
                   ))}
                 </tbody>
                 <tfoot>
-                  <tr className="border-t border-line bg-paper font-medium">
-                    <td colSpan={2} className="px-3 py-2 text-xs text-ink-muted">Totale commessa</td>
-                    <td className="px-3 py-2 num">{fmtMin(samTotale)}</td>
+                  <tr className="border-t border-line bg-paper font-medium text-xs">
+                    <td colSpan={3} className="px-3 py-2 text-ink-muted">Totale commessa</td>
+                    <td className="px-3 py-2 num">{totOre.toFixed(2)}h</td>
                     <td colSpan={3}></td>
                     <td className="px-3 py-2 num">{costoMdoTotUnit > 0 ? fmtEur(costoMdoTotUnit) : "—"}</td>
-                    <td></td>
                   </tr>
                 </tfoot>
               </table>
@@ -205,17 +190,16 @@ export default async function MetodiTempiPage() {
           );
         })}
 
-        {/* ══ CARICO MACCHINE ═══════════════════════════════════════════ */}
+        {/* ══ CARICO MACCHINE ════════════════════════════════════════════ */}
         {caricoMap.size > 0 && (
           <div>
-            <h2 className="mb-4">Carico macchine — ore necessarie vs capacità annua</h2>
+            <h2 className="mb-4">Carico macchine — ore necessarie vs capacità annua (250 gg)</h2>
             <div className="border border-line">
               <table className="table-zebra w-full">
                 <thead>
                   <tr>
                     <th>Macchina</th>
                     <th>Reparto</th>
-                    <th>Tipo operazione</th>
                     <th className="text-right">Ore necessarie</th>
                     <th className="text-right">Capacità annua</th>
                     <th className="text-right">Carico %</th>
@@ -226,18 +210,15 @@ export default async function MetodiTempiPage() {
                   {Array.from(caricoMap.values())
                     .sort((a, b) => (b.minNecessari / minDisponibiliAnno(b.macchina)) - (a.minNecessari / minDisponibiliAnno(a.macchina)))
                     .map(({ macchina, minNecessari, commesse }) => {
-                      const minDisp  = minDisponibiliAnno(macchina);
+                      const minDisp    = minDisponibiliAnno(macchina);
                       const caricoPerc = minDisp > 0 ? (minNecessari / minDisp) * 100 : 0;
                       const overload   = caricoPerc > 100;
-                      const oreNec     = minNecessari / 60;
-                      const oreDisp    = minDisp / 60;
                       return (
                         <tr key={macchina.id}>
                           <td className="font-medium">{macchina.nome}</td>
                           <td className="text-ink-muted text-sm">{macchina.reparto.nome}</td>
-                          <td><span className="font-mono text-xs bg-line px-1.5 py-0.5">{macchina.tipoOperazione}</span></td>
-                          <td className={`num ${overload ? "num-neg" : ""}`}>{oreNec.toFixed(0)} h</td>
-                          <td className="num text-ink-muted">{oreDisp.toFixed(0)} h</td>
+                          <td className={`num ${overload ? "num-neg" : ""}`}>{(minNecessari / 60).toFixed(0)} h</td>
+                          <td className="num text-ink-muted">{(minDisp / 60).toFixed(0)} h</td>
                           <td className="px-3 py-2.5 align-middle">
                             <div className="flex items-center gap-2 justify-end">
                               <div className="w-20 h-1.5 bg-line">
@@ -247,8 +228,7 @@ export default async function MetodiTempiPage() {
                                 />
                               </div>
                               <span className={`num text-xs ${overload ? "num-neg font-medium" : ""}`}>
-                                {caricoPerc.toFixed(0)}%
-                                {overload && " ⚠"}
+                                {caricoPerc.toFixed(0)}%{overload && " ⚠"}
                               </span>
                             </div>
                           </td>
@@ -262,23 +242,21 @@ export default async function MetodiTempiPage() {
           </div>
         )}
 
-        {/* ══ COPERTURA SKILL ════════════════════════════════════════════ */}
-        {tipiRichiesti.length > 0 && (
+        {/* ══ COPERTURA SKILL PER REPARTO ════════════════════════════════ */}
+        {repartiRichiesti.length > 0 && (
           <div>
-            <h2 className="mb-4">Copertura skill — operatori disponibili per tipo operazione</h2>
+            <h2 className="mb-4">Copertura operatori per reparto</h2>
             <div className="grid grid-cols-2 gap-4 max-w-3xl">
-              {tipiRichiesti.map((tipo) => {
-                const qualificati = dipendenti.filter((d) =>
-                  d.skills.some((s) => s.tipoOperazione === tipo),
-                );
-                const ok = qualificati.length >= 2; // almeno 2 per ridondanza
+              {repartiRichiesti.map((r) => {
+                const qualificati = operatoriPerReparto(r.id);
+                const ok = qualificati.length >= 2;
                 return (
                   <div
-                    key={tipo}
+                    key={r.id}
                     className={`border px-4 py-3 flex items-center justify-between ${ok ? "border-line" : "border-accent-neg/40 bg-accent-neg/5"}`}
                   >
                     <div>
-                      <div className="font-mono text-xs">{tipo}</div>
+                      <div className="font-medium text-sm">{r.nome}</div>
                       <div className="text-xs text-ink-muted mt-0.5">
                         {qualificati.length > 0
                           ? qualificati.map((d) => `${d.nome} (${d.efficienzaPerc}%)`).join(" · ")
@@ -286,11 +264,7 @@ export default async function MetodiTempiPage() {
                       </div>
                     </div>
                     <div className={`text-sm font-medium ml-4 ${ok ? "num-pos" : qualificati.length === 1 ? "" : "num-neg"}`}>
-                      {qualificati.length === 0
-                        ? "⚠ 0"
-                        : qualificati.length === 1
-                        ? `⚡ 1`
-                        : `✓ ${qualificati.length}`}
+                      {qualificati.length === 0 ? "⚠ 0" : qualificati.length === 1 ? `⚡ 1` : `✓ ${qualificati.length}`}
                     </div>
                   </div>
                 );
@@ -302,10 +276,10 @@ export default async function MetodiTempiPage() {
           </div>
         )}
 
-        {prodotti.every((p) => p.operazioniCiclo.length === 0) && (
+        {prodotti.every((p) => p.fasi.length === 0) && (
           <div className="text-sm text-ink-muted">
-            Configura il ciclo di lavorazione in{" "}
-            <a href="/ciclo" className="underline underline-offset-2">Ciclo di lavorazione</a>{" "}
+            Configura le fasi di lavorazione in{" "}
+            <a href="/fasi" className="underline underline-offset-2">Fasi di lavorazione</a>{" "}
             per avviare l&apos;analisi.
           </div>
         )}

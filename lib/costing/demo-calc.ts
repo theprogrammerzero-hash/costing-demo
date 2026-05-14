@@ -1,23 +1,18 @@
 /**
- * Calcolo Full Costing + BEP per il modello demo.
+ * Calcolo Full Costing + BEP per il modello demo — versione Fasi di Lavorazione.
  *
- * Separazione corretta costi variabili / fissi (Lezione 18/24):
- *   cv  = SOLO variabili: Σ reparti (oreMacchina × tariffaVarMacchina + oreMdo × tariffaMdo) + materiePrime
- *   CF  = ammortamenti + stipendi fissi + affitti — dalla lista VoceCostoFisso per reparto
+ * Ogni commessa ha una lista di FaseLavorazione (es. Taglio, Preconfezione, Confezione…).
+ * Ogni fase appartiene a un reparto e ha un tempoOre per pezzo.
  *
- * Allocazione CF — tariffa predeterminata a capacità (metodo standard industriale):
- *   Se oreCapacitaAnnua_R > 0:
- *     tariffaCF_R = CF_R / oreCapacitaAnnua_R                    ← €/ora fissa, indipendente dal mix
- *     quotaFissaUnit[p][R] = tariffaCF_R × oreMacchina[p][R]     ← COSTANTE per prodotto
- *   Altrimenti (fallback):
- *     allocazione proporzionale alla produzione effettiva (comportamento precedente)
+ * Costi variabili per fase:
+ *   energia  = tempoOre × kWInstallata × prezzoEnergia    [€/pz]
+ *   MdO      = tempoOre × tariffaMdo                      [€/pz]
  *
- * Il costo fisso unitario di un prodotto NON cambia al variare della quantità degli altri prodotti.
- * Le ore di capacità non assorbite dai prodotti generano "costo idle" — KPI gestionale.
+ * Costi fissi (tariffa predeterminata a capacità):
+ *   tariffaCF_R = Σ(VoceCostiFisso_R) / oreCapacitaAnnua_R   [€/h]
+ *   quotaCF     = tariffaCF_R × Σ_fasi_in_R(tempoOre)        [€/pz]
  *
- * Formula BEP corretta:
- *   Q* = CF_allocati / (prezzo − cv)
- *   Se prezzo ≤ cv → BEP irraggiungibile; prezzoSuggerito = costoComplessivo @ Q_prevista
+ * Il costo fisso unitario è stabile — non cambia al variare del mix commesse.
  */
 
 export interface VoceCostoFissoData {
@@ -31,11 +26,10 @@ export interface RepartoData {
   id: string;
   codice: string;
   nome: string;
-  tariffaVarMacchina: number;       // €/h — consumabili/utensili (NO energia)
-  tariffaMdo: number;
-  oreCapacitaAnnua: number;         // 0 = usa fallback proporzionale
-  kWInstallata: number;             // kW potenza installata (0 = non configurato)
-  prezzoEnergia: number;            // €/kWh tariffa energia
+  tariffaMdo: number;           // €/h — manodopera diretta
+  oreCapacitaAnnua: number;     // ore disponibili/anno (per tariffa CF)
+  kWInstallata: number;         // kW potenza installata
+  prezzoEnergia: number;        // €/kWh tariffa energia
   voceCostiFissi: VoceCostoFissoData[];
 }
 
@@ -51,41 +45,44 @@ export interface ProdottoData {
   materiePrime: number;
 }
 
-export interface LavData {
+export interface FaseData {
+  id: string;
   prodottoId: string;
   repartoId: string;
-  oreMacchina: number;
-  oreMdo: number;
+  macchinaId?: string | null;
+  sequenza: number;
+  nome: string;
+  tempoOre: number;   // ore per pezzo
 }
 
 export interface IdleCapacityReparto {
   repartoId: string;
   nome: string;
   cfAnnui: number;
-  oreDisponibili: number;           // oreCapacitaAnnua
-  oreUsate: number;                 // Σ prodotti oreMacchina×quantità
-  utilizzoPerc: number;             // oreUsate/oreDisponibili × 100
-  costoIdleAnnuo: number;           // CF non assorbiti (= tariffaCF × oreInutilizzate)
-  tariffaCF: number;                // €/ora predeterminata (0 se fallback)
+  oreDisponibili: number;
+  oreUsate: number;
+  utilizzoPerc: number;
+  costoIdleAnnuo: number;
+  tariffaCF: number;
 }
 
 export interface ProdottoResult {
   prodotto: ProdottoData;
 
-  // Costo variabile per unità (SOLO variabili)
-  costoVarMacchinaUnit: number;
-  costoMdoUnit: number;
-  costoVariabileUnit: number;
+  // Costi variabili per unità
+  costoEnergiaUnit: number;    // Σ fasi: tempoOre × kW × €/kWh
+  costoMdoUnit: number;        // Σ fasi: tempoOre × tariffaMdo
+  costoVariabileUnit: number;  // energia + MdO + materiePrime
 
   // Quota costi fissi struttura
   quotaFissaAnnua: number;
   quotaFissaUnit: number;
 
-  // Costi amm.vi/commerciali effettivi
+  // Costi amm.vi/commerciali
   percAmmCommEffettiva: number;
   ammCommUnit: number;
-  tariffaAmmCommOre: number;   // €/h (0 se modalità PERC o fallback proporzionale)
-  oreMacchinaUnitTot: number;  // Σ_R oreMacchina[p][R] — ore macchina totali per unità
+  tariffaAmmCommOre: number;
+  oreFasiUnitTot: number;   // Σ tempoOre di tutte le fasi per unità
 
   // Configurazioni di costo
   costoIndustrialeUnit: number;
@@ -102,21 +99,27 @@ export interface ProdottoResult {
   margineSicurezzaPerc: number | null;
   cfAllocati: number;
 
-  // Prezzo suggerito per coprire tutti i costi alla quantità prevista
   prezzoSuggerito: number;
 
-  // Dettaglio per reparto
+  // Dettaglio aggregato per reparto
   dettaglioReparti: {
     reparto: RepartoData;
-    oreMacchina: number;
-    oreMdo: number;
-    costoEnergiaUnit: number;       // kWInstallata × prezzoEnergia × oreMacchina
-    costoConsumabiliUnit: number;   // tariffaVarMacchina × oreMacchina
-    costoVarMacchinaUnit: number;   // totale: energia + consumabili
+    tempoOre: number;           // totale ore fasi in questo reparto
+    costoEnergiaUnit: number;
     costoMdoUnit: number;
-    quotaFissaRep: number;          // quota CF annua assorbita da questo prodotto in questo reparto
-    tariffaCFUsata: number;         // €/ora CF (da capacità o proporzionale)
+    quotaFissaRep: number;
+    tariffaCFUsata: number;
     metodo: "CAPACITA" | "PROPORZIONALE";
+  }[];
+
+  // Dettaglio per singola fase
+  dettaglioFasi: {
+    faseId: string;
+    nome: string;
+    repartoNome: string;
+    tempoOre: number;
+    costoEnergiaUnit: number;
+    costoMdoUnit: number;
   }[];
 }
 
@@ -128,24 +131,28 @@ export interface CalcResult {
 export function calcDemoFullCosting(
   reparti: RepartoData[],
   prodotti: ProdottoData[],
-  lavorazioni: LavData[],
+  fasi: FaseData[],
   percAmmComm: number,
   baseRiparto: string = "ORE_MACCHINA",
   ammCommTipo: string = "PERC",
   ammCommValore: number = 0,
 ): CalcResult {
-  const lavMap = new Map<string, LavData>(
-    lavorazioni.map((l) => [`${l.prodottoId}_${l.repartoId}`, l]),
-  );
+  // Mappa lookup reparto per id
+  const repartoById = new Map<string, RepartoData>(reparti.map((r) => [r.id, r]));
 
-  // CF annui per reparto = Σ voceCostiFissi.importo
+  // Aggrega tempoOre per prodottoId_repartoId (somma di tutte le fasi nello stesso reparto)
+  const oreMap = new Map<string, number>();
+  for (const f of fasi) {
+    const key = `${f.prodottoId}_${f.repartoId}`;
+    oreMap.set(key, (oreMap.get(key) ?? 0) + f.tempoOre);
+  }
+
+  // CF annui per reparto
   const cfReparto = new Map<string, number>(
     reparti.map((r) => [r.id, r.voceCostiFissi.reduce((s, v) => s + v.importo, 0)]),
   );
 
-  // ── Tariffe CF per reparto ────────────────────────────────────────────────
-  // Se oreCapacitaAnnua > 0: tariffa predeterminata a capacità (stabile)
-  // Altrimenti: calcolata in seguito dall'allocazione proporzionale
+  // Tariffe CF per reparto (predeterminate a capacità)
   const tariffeCF = new Map<string, { tariffa: number; metodo: "CAPACITA" | "PROPORZIONALE" }>();
   for (const r of reparti) {
     const cfR = cfReparto.get(r.id) ?? 0;
@@ -156,52 +163,47 @@ export function calcDemoFullCosting(
     }
   }
 
-  // ── Helper proporzionale (fallback) ──────────────────────────────────────
+  // Helper: base totale per riparto proporzionale (fallback)
   function getBaseTotaleReparto(repartoId: string): number {
     return prodotti.reduce((sum, p) => {
-      const lav = lavMap.get(`${p.id}_${repartoId}`);
-      if (!lav) return sum;
+      const ore = oreMap.get(`${p.id}_${repartoId}`) ?? 0;
+      if (ore === 0) return sum;
       switch (baseRiparto) {
-        case "ORE_MOD":    return sum + lav.oreMdo * p.quantita;
         case "COSTO_DIRETTO": {
-          const cv = calcCVUnit(p, reparti, lavMap);
+          const cv = calcCVUnit(p, reparti, oreMap);
           return sum + cv * p.quantita;
         }
-        default:           return sum + lav.oreMacchina * p.quantita;
+        default: // ORE_MACCHINA, ORE_MOD → usa ore fasi (stessa cosa nel nuovo modello)
+          return sum + ore * p.quantita;
       }
     }, 0);
   }
 
-  // ── PASSO 1: calcola costoIndustriale per ogni prodotto (serve per VALORE ammComm) ──
+  // Passo 1: costo industriale base (per calcolare tariffa ammComm VALORE)
   const costoIndustrialeBase = new Map<string, number>();
   for (const p of prodotti) {
-    let cvM = 0, cvMdo = 0, qfUnit = 0;
+    let cvE = 0, cvMdo = 0, qfUnit = 0;
     for (const r of reparti) {
-      const lav = lavMap.get(`${p.id}_${r.id}`);
-      if (!lav) continue;
-      cvM   += lav.oreMacchina * r.tariffaVarMacchina;
-      cvMdo += lav.oreMdo * r.tariffaMdo;
+      const ore = oreMap.get(`${p.id}_${r.id}`) ?? 0;
+      if (ore === 0) continue;
+      cvE   += ore * r.kWInstallata * r.prezzoEnergia;
+      cvMdo += ore * r.tariffaMdo;
       const info = tariffeCF.get(r.id)!;
       if (info.metodo === "CAPACITA") {
-        qfUnit += info.tariffa * lav.oreMacchina;
+        qfUnit += info.tariffa * ore;
       } else {
-        // proporzionale: calcola pro-quota
         const cfR     = cfReparto.get(r.id) ?? 0;
         const baseTot = getBaseTotaleReparto(r.id);
         if (cfR > 0 && baseTot > 0) {
-          const bp = baseProdottoUnit(lav, baseRiparto, cvM + cvMdo + p.materiePrime);
+          const bp = ore; // base per unità = tempoOre
           qfUnit += (cfR * bp * p.quantita / baseTot) / p.quantita;
         }
       }
     }
-    costoIndustrialeBase.set(p.id, cvM + cvMdo + p.materiePrime + qfUnit);
+    costoIndustrialeBase.set(p.id, cvE + cvMdo + p.materiePrime + qfUnit);
   }
 
-  // ── PASSO 2: tariffa amm.vi/comm.li ──────────────────────────────────────
-  // In modalità PERC: % fissa su costo industriale (invariato)
-  // In modalità VALORE: tariffa predeterminata €/h su capacità totale reparti
-  //   tariffaAmmComm = ammCommValore / Σ_reparti(oreCapacitaAnnua)
-  //   → coerente con il modello tariffaCF; costo commessa proporzionale alle ore usate
+  // Passo 2: tariffa amm.vi/comm.li
   let percEffettiva = percAmmComm;
   let tariffaAmmCommOre = 0;
 
@@ -209,9 +211,7 @@ export function calcDemoFullCosting(
     const totalOreCapacita = reparti.reduce((s, r) => s + r.oreCapacitaAnnua, 0);
     if (totalOreCapacita > 0) {
       tariffaAmmCommOre = ammCommValore / totalOreCapacita;
-      // percEffettiva non viene usata in questo ramo — ogni commessa calcola la propria % effettiva
     } else {
-      // fallback proporzionale: nessun reparto ha oreCapacitaAnnua definite
       const totCostoIndBase = prodotti.reduce(
         (s, p) => s + (costoIndustrialeBase.get(p.id) ?? 0) * p.quantita,
         0,
@@ -220,44 +220,37 @@ export function calcDemoFullCosting(
     }
   }
 
-  // ── PASSO 3: calcolo completo per ogni prodotto ───────────────────────────
+  // Passo 3: calcolo completo per ogni prodotto
   const risultati: ProdottoResult[] = prodotti.map((p) => {
-    let costoVarMacchinaUnit = 0;
-    let costoMdoUnitVal = 0;
+    let costoEnergiaUnitTot = 0;
+    let costoMdoUnitTot = 0;
     let quotaFissaUnitVal = 0;
     let quotaFissaAnnua = 0;
 
     const dettaglioReparti = reparti.map((r) => {
-      const lav  = lavMap.get(`${p.id}_${r.id}`);
-      const oreMacchina = lav?.oreMacchina ?? 0;
-      const oreMdo      = lav?.oreMdo      ?? 0;
-      // Costo energia: kW × €/kWh × ore macchina (variabile puro)
+      const ore = oreMap.get(`${p.id}_${r.id}`) ?? 0;
       const tariffaEnergiaH = r.kWInstallata * r.prezzoEnergia;
-      const cEnergiaUnit    = oreMacchina * tariffaEnergiaH;
-      const cConsumabiliUnit = oreMacchina * r.tariffaVarMacchina;
-      const cvm  = cEnergiaUnit + cConsumabiliUnit;
-      const cmdo = oreMdo * r.tariffaMdo;
-      costoVarMacchinaUnit += cvm;
-      costoMdoUnitVal      += cmdo;
+      const cEnergiaUnit    = ore * tariffaEnergiaH;
+      const cMdoUnit        = ore * r.tariffaMdo;
+      costoEnergiaUnitTot += cEnergiaUnit;
+      costoMdoUnitTot     += cMdoUnit;
 
       const info  = tariffeCF.get(r.id)!;
       const cfR   = cfReparto.get(r.id) ?? 0;
       let quotaRepAnnua = 0;
       let tariffaUsata  = 0;
 
-      if (info.metodo === "CAPACITA") {
-        // Tariffa predeterminata: quota = tariffa × oreMacchina × quantità
-        tariffaUsata  = info.tariffa;
-        quotaRepAnnua = info.tariffa * oreMacchina * p.quantita;
-      } else {
-        // Proporzionale (fallback)
-        if (cfR > 0 && lav) {
-          const cvCur = costoVarMacchinaUnit + costoMdoUnitVal + p.materiePrime;
-          const baseTot = getBaseTotaleReparto(r.id);
-          if (baseTot > 0) {
-            const bp = baseProdottoUnit(lav, baseRiparto, cvCur);
-            quotaRepAnnua = cfR * (bp * p.quantita / baseTot);
-            tariffaUsata  = baseTot > 0 ? cfR / baseTot : 0;
+      if (ore > 0) {
+        if (info.metodo === "CAPACITA") {
+          tariffaUsata  = info.tariffa;
+          quotaRepAnnua = info.tariffa * ore * p.quantita;
+        } else {
+          if (cfR > 0) {
+            const baseTot = getBaseTotaleReparto(r.id);
+            if (baseTot > 0) {
+              quotaRepAnnua = cfR * (ore * p.quantita / baseTot);
+              tariffaUsata  = cfR / baseTot;
+            }
           }
         }
       }
@@ -267,53 +260,54 @@ export function calcDemoFullCosting(
 
       return {
         reparto: r,
-        oreMacchina,
-        oreMdo,
+        tempoOre: ore,
         costoEnergiaUnit: cEnergiaUnit,
-        costoConsumabiliUnit: cConsumabiliUnit,
-        costoVarMacchinaUnit: cvm,
-        costoMdoUnit: cmdo,
+        costoMdoUnit: cMdoUnit,
         quotaFissaRep: quotaRepAnnua,
         tariffaCFUsata: tariffaUsata,
         metodo: info.metodo,
       };
     });
 
-    const costoVariabileUnit   = costoVarMacchinaUnit + costoMdoUnitVal + p.materiePrime;
+    // Dettaglio per singola fase
+    const faseProdotto = fasi.filter((f) => f.prodottoId === p.id).sort((a, b) => a.sequenza - b.sequenza);
+    const dettaglioFasi = faseProdotto.map((f) => {
+      const r = repartoById.get(f.repartoId);
+      return {
+        faseId: f.id,
+        nome: f.nome,
+        repartoNome: r?.nome ?? "—",
+        tempoOre: f.tempoOre,
+        costoEnergiaUnit: f.tempoOre * (r?.kWInstallata ?? 0) * (r?.prezzoEnergia ?? 0),
+        costoMdoUnit: f.tempoOre * (r?.tariffaMdo ?? 0),
+      };
+    });
+
+    const costoVariabileUnit   = costoEnergiaUnitTot + costoMdoUnitTot + p.materiePrime;
     const costoIndustrialeUnit = costoVariabileUnit + quotaFissaUnitVal;
 
-    // Ore macchina totali per unità (Σ reparti) — usate per tariffa oraria amm.vi
-    const oreMacchinaUnitTot = reparti.reduce((s, r) => {
-      const lav = lavMap.get(`${p.id}_${r.id}`);
-      return s + (lav?.oreMacchina ?? 0);
-    }, 0);
+    // Ore totali fasi per unità (usate per tariffa oraria amm.vi)
+    const oreFasiUnitTot = faseProdotto.reduce((s, f) => s + f.tempoOre, 0);
 
     let ammCommUnit: number;
     let percAmmCommEffettivaResult: number;
     if (ammCommTipo === "VALORE" && tariffaAmmCommOre > 0) {
-      // Tariffa oraria: costo amm.vi proporzionale alle ore macchina lavorate
-      ammCommUnit = tariffaAmmCommOre * oreMacchinaUnitTot;
+      ammCommUnit = tariffaAmmCommOre * oreFasiUnitTot;
       percAmmCommEffettivaResult = costoIndustrialeUnit > 0
         ? (ammCommUnit / costoIndustrialeUnit) * 100
         : 0;
     } else {
-      // Percentuale fissa su costo industriale (PERC mode o fallback VALORE senza ore capacità)
       ammCommUnit = costoIndustrialeUnit * (percEffettiva / 100);
       percAmmCommEffettivaResult = percEffettiva;
     }
 
     const costoComplessivoUnit = costoIndustrialeUnit + ammCommUnit;
-
-    const margineUnit =
-      p.prezzoVendita != null ? p.prezzoVendita - costoComplessivoUnit : null;
-    const marginePerc =
-      p.prezzoVendita != null && p.prezzoVendita > 0
-        ? (margineUnit! / p.prezzoVendita) * 100
-        : null;
+    const margineUnit  = p.prezzoVendita != null ? p.prezzoVendita - costoComplessivoUnit : null;
+    const marginePerc  = p.prezzoVendita != null && p.prezzoVendita > 0
+      ? (margineUnit! / p.prezzoVendita) * 100 : null;
 
     const cfAllocati = quotaFissaAnnua + ammCommUnit * p.quantita;
-
-    const mgcUnit = p.prezzoVendita != null ? p.prezzoVendita - costoVariabileUnit : null;
+    const mgcUnit    = p.prezzoVendita != null ? p.prezzoVendita - costoVariabileUnit : null;
     const bepRaggiungibile = mgcUnit !== null && mgcUnit > 0;
 
     let bepQuantita: number | null = null;
@@ -330,15 +324,15 @@ export function calcDemoFullCosting(
 
     return {
       prodotto: p,
-      costoVarMacchinaUnit,
-      costoMdoUnit: costoMdoUnitVal,
+      costoEnergiaUnit: costoEnergiaUnitTot,
+      costoMdoUnit: costoMdoUnitTot,
       costoVariabileUnit,
       quotaFissaAnnua,
       quotaFissaUnit: quotaFissaUnitVal,
       percAmmCommEffettiva: percAmmCommEffettivaResult,
       ammCommUnit,
       tariffaAmmCommOre,
-      oreMacchinaUnitTot,
+      oreFasiUnitTot,
       costoIndustrialeUnit,
       costoComplessivoUnit,
       margineUnit,
@@ -350,23 +344,23 @@ export function calcDemoFullCosting(
       cfAllocati,
       prezzoSuggerito: costoComplessivoUnit,
       dettaglioReparti,
+      dettaglioFasi,
     };
   });
 
-  // ── Idle capacity per reparto ─────────────────────────────────────────────
+  // Idle capacity per reparto
   const idleCapacity: IdleCapacityReparto[] = reparti.map((r) => {
-    const cfR   = cfReparto.get(r.id) ?? 0;
-    const info  = tariffeCF.get(r.id)!;
+    const cfR      = cfReparto.get(r.id) ?? 0;
+    const info     = tariffeCF.get(r.id)!;
     const oreUsate = prodotti.reduce((sum, p) => {
-      const lav = lavMap.get(`${p.id}_${r.id}`);
-      return sum + (lav?.oreMacchina ?? 0) * p.quantita;
+      return sum + (oreMap.get(`${p.id}_${r.id}`) ?? 0) * p.quantita;
     }, 0);
 
     const oreDisponibili = r.oreCapacitaAnnua > 0 ? r.oreCapacitaAnnua : oreUsate;
     const utilizzoPerc   = oreDisponibili > 0 ? (oreUsate / oreDisponibili) * 100 : 100;
     const costoIdleAnnuo = info.metodo === "CAPACITA"
       ? info.tariffa * Math.max(0, oreDisponibili - oreUsate)
-      : 0; // no idle cost in proporzionale (tutto assorbito)
+      : 0;
 
     return {
       repartoId: r.id,
@@ -383,28 +377,14 @@ export function calcDemoFullCosting(
   return { risultati, idleCapacity };
 }
 
-// ── Helper: base prodotto per unità (senza × quantità) ────────────────────
-function baseProdottoUnit(
-  lav: LavData,
-  baseRiparto: string,
-  cvUnit: number,
-): number {
-  switch (baseRiparto) {
-    case "ORE_MOD":       return lav.oreMdo;
-    case "COSTO_DIRETTO": return cvUnit;
-    default:              return lav.oreMacchina;
-  }
-}
-
-// Helper per COSTO_DIRETTO base (primo passaggio)
+// Helper CV per COSTO_DIRETTO base
 function calcCVUnit(
   p: ProdottoData,
   reparti: RepartoData[],
-  lavMap: Map<string, LavData>,
+  oreMap: Map<string, number>,
 ): number {
   return reparti.reduce((sum, r) => {
-    const lav = lavMap.get(`${p.id}_${r.id}`);
-    if (!lav) return sum;
-    return sum + lav.oreMacchina * r.tariffaVarMacchina + lav.oreMdo * r.tariffaMdo;
+    const ore = oreMap.get(`${p.id}_${r.id}`) ?? 0;
+    return sum + ore * r.kWInstallata * r.prezzoEnergia + ore * r.tariffaMdo;
   }, p.materiePrime);
 }

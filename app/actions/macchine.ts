@@ -12,9 +12,7 @@ export async function createMacchina(formData: FormData) {
       repartoId:         f(formData, "repartoId"),
       codice:            f(formData, "codice"),
       nome:              f(formData, "nome"),
-      tipoOperazione:    f(formData, "tipoOperazione").toUpperCase().replace(/\s+/g, "_"),
       capacitaMinGiorno: fNum(formData, "capacitaMinGiorno") || 480,
-      tempoSetupMin:     fNum(formData, "tempoSetupMin"),
     },
   });
   revalidatePath("/macchine");
@@ -27,9 +25,7 @@ export async function updateMacchina(id: string, formData: FormData) {
     data: {
       codice:            f(formData, "codice"),
       nome:              f(formData, "nome"),
-      tipoOperazione:    f(formData, "tipoOperazione").toUpperCase().replace(/\s+/g, "_"),
       capacitaMinGiorno: fNum(formData, "capacitaMinGiorno") || 480,
-      tempoSetupMin:     fNum(formData, "tempoSetupMin"),
     },
   });
   revalidatePath("/macchine");

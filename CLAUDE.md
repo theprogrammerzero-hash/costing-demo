@@ -43,10 +43,9 @@ app/
 ├── page.tsx                    # Dashboard KPI
 ├── reparti/page.tsx            # CRUD reparti con costi fissi e tariffe
 ├── prodotti/page.tsx           # CRUD commesse/prodotti
-├── tempi/page.tsx              # Matrice ore lavorazione (prodotto × reparto)
+├── fasi/page.tsx               # Fasi di lavorazione per commessa (sostituisce tempi+ciclo)
 ├── macchine/page.tsx           # CRUD macchine per reparto
-├── dipendenti/page.tsx         # CRUD operatori + skill matrix
-├── ciclo/page.tsx              # Ciclo di lavorazione (sequenza operazioni per commessa)
+├── dipendenti/page.tsx         # CRUD operatori + skill matrix per reparto
 ├── metodi-tempi/page.tsx       # Analisi: assegnazione ottimale operatori, carico macchine
 ├── risultati/page.tsx          # Full costing cascade + BEP per commessa
 ├── configurazione/page.tsx     # % amm.vi/comm.li, base di riparto
@@ -78,37 +77,33 @@ prisma/
 ## Modello dati (Prisma)
 
 ### Reparto
-- `tariffaVarMacchina` — €/h solo consumabili/utensili (NO energia)
 - `tariffaMdo` — €/h manodopera diretta
-- `oreCapacitaAnnua` — ore disponibili/anno (usate per tariffa CF e tariffa amm.vi)
+- `oreCapacitaAnnua` — ore disponibili/anno (usate per tariffa CF predeterminata)
 - `kWInstallata` — potenza installata (kW)
 - `prezzoEnergia` — €/kWh tariffa energia
-- `voceCostiFissi` → `VoceCostoFisso[]` — voci dettagliate CF annui (ammortamenti, affitti, ecc.)
+- `voceCostiFissi` → `VoceCostoFisso[]` — voci dettagliate CF annui
 
 ### Macchina
 - Appartiene a un `Reparto`
-- `tipoOperazione` — chiave che collega macchina ↔ skill dipendente ↔ operazione ciclo
 - `capacitaMinGiorno` — minuti disponibili/giorno (default 480 = 8h)
+- Opzionale nelle FaseLavorazione — usata per analisi carico macchine
 
 ### Dipendente + SkillDipendente
-- `efficienzaPerc` — velocità rispetto al tempo standard (100% = standard, 85% = 15% più lento)
+- `efficienzaPerc` — velocità rispetto al tempo standard (100% = standard)
 - `costoOrario` — €/h per calcolo costo MdO
-- `skills[]` — tipi operazione che sa eseguire (es. "CNC_FRESATURA", "ASSEMBLAGGIO")
+- `skills[]` → `repartoId` — reparti dove sa operare (nuovo: per reparto, non per tipo operazione)
 
 ### Prodotto (= Commessa)
 - `quantita` — pezzi da produrre
 - `dataInizio` / `dataFine` — per calcolo takt time
-- `lavorazioni[]` → `LavorazioneReparto[]` — ore macchina/MdO per reparto
-- `operazioniCiclo[]` → `OperazioneCiclo[]` — sequenza operazioni con SAM
+- `fasi[]` → `FaseLavorazione[]` — sequenza fasi con reparto, macchina, tempoOre
 
-### OperazioneCiclo
-- `sequenza` — ordine nell'ciclo
-- `tipoOperazione` — collega a Macchina e SkillDipendente
-- `tempoStdMin` — SAM (Standard Allowed Minutes) per unità
-
-### LavorazioneReparto
-- `oreMacchina` + `oreMdo` per unità prodotta
-- Usata dal motore di calcolo costi (`demo-calc.ts`)
+### FaseLavorazione ⬅ MODELLO CENTRALE (sostituisce LavorazioneReparto + OperazioneCiclo)
+- `sequenza` — ordine esecuzione (1, 2, 3…)
+- `nome` — es. "Taglio", "Preconfezione", "Confezione", "Ricamo"
+- `repartoId` — reparto che esegue la fase
+- `macchinaId` (opzionale) — macchina assegnata alla fase
+- `tempoOre` — ore per pezzo (inserire sempre PER SINGOLO PEZZO, es. 30min = 0.50h)
 
 ### Configurazione (singleton, id="main")
 - `percAmmComm` — % oppure budget €/anno costi amm.vi/comm.li
@@ -122,27 +117,26 @@ prisma/
 ### Struttura costo per unità (cascade)
 ```
 Materie prime
-+ Costo macchina variabile    = oreMacchina × tariffaVarMacchina
-+ Costo energia               = oreMacchina × kWInstallata × prezzoEnergia
-+ Costo MdO diretta           = oreMdo × tariffaMdo
++ Σ_fasi (tempoOre × kWInstallata × prezzoEnergia)   ← energia per fase
++ Σ_fasi (tempoOre × tariffaMdo)                     ← MdO per fase
 = COSTO DIRETTO
 
-+ Quota CF reparto            = tariffaCF × oreMacchina
-  dove tariffaCF = Σ(VoceCostiFisso) / oreCapacitaAnnua  [€/h]
++ Quota CF reparto = tariffaCF_R × Σ_fasi_in_R(tempoOre)
+  dove tariffaCF_R = Σ(VoceCostiFisso_R) / oreCapacitaAnnua_R  [€/h]
 = COSTO INDUSTRIALE
 
-+ Costi amm.vi/comm.li        = tariffaAmmComm × oreMacchinaUnit_tot
++ Costi amm.vi/comm.li = tariffaAmmComm × oreFasiUnitTot
   dove tariffaAmmComm = budgetAmmComm / Σ_reparti(oreCapacitaAnnua) [€/h]
 = COSTO COMPLESSIVO
 ```
 
 ### Principio chiave: tariffe predeterminate a capacità
-Sia i CF che i costi amm.vi usano tariffe `€/h` calcolate sulla **capacità annua** dei reparti, non sulle ore effettivamente usate. Questo rende i costi di un prodotto **stabili** — non cambiano se aggiungo o rimuovo altri prodotti.
+Sia i CF che i costi amm.vi usano tariffe `€/h` calcolate sulla **capacità annua** dei reparti. Il costo di un prodotto è **stabile** — non cambia al variare del mix commesse.
 
-### Energia: modello split
-`tariffaVarMacchina` = solo consumabili e utensili  
-Energia calcolata separatamente: `kWInstallata × prezzoEnergia × oreMacchina`  
-In `/risultati` si vede la composizione: `M 0.50h × [⚡€4.20 + cons.€7.80]`
+### Dati demo (seed.ts)
+- CNC: MdO €22/h, energia 15kW×0.28=€4.20/h → cv €26.20/h, CF €80k/4000h = €20/h
+- ASM: MdO €20/h, energia 3kW×0.28=€0.84/h → cv €20.84/h, CF €45k/3000h = €15/h
+- COLL: MdO €18/h, energia 2kW×0.28=€0.56/h → cv €18.56/h, CF €25k/1500h = €16.67/h
 
 ---
 
@@ -151,13 +145,12 @@ In `/risultati` si vede la composizione: `M 0.50h × [⚡€4.20 + cons.€7.80]
 | Route | Descrizione |
 |-------|-------------|
 | `/` | Dashboard: KPI totali, tabella riepilogativa commesse, CF idle |
-| `/reparti` | CRUD reparti con voci costi fissi annui, tariffe, kW, energia |
+| `/reparti` | CRUD reparti con voci costi fissi annui, tariffe MdO, kW, energia |
 | `/prodotti` | CRUD commesse con materie prime, quantità, prezzo, date |
-| `/tempi` | Matrice ore: per ogni prodotto × reparto inserisce oreMacchina e oreMdo |
-| `/macchine` | CRUD macchine raggruppate per reparto, con tipo operazione e capacità |
-| `/dipendenti` | CRUD operatori + skill matrix (assegna/rimuovi skill) |
-| `/ciclo` | Per ogni commessa: sequenza operazioni SAM, bottleneck highlight, takt time, KPI linea |
-| `/metodi-tempi` | Analisi: operatore ottimale per operazione, carico macchine vs capacità, copertura skill |
+| `/fasi` | **PRINCIPALE** — Fasi di lavorazione per commessa: sequenza, reparto, macchina, h/pz |
+| `/macchine` | CRUD macchine per reparto, con capacità (opzionali nelle fasi) |
+| `/dipendenti` | CRUD operatori + skill matrix per reparto |
+| `/metodi-tempi` | Analisi: operatore ottimale per fase, carico macchine, copertura skill |
 | `/risultati` | Full costing cascade per ogni commessa + BEP (grafico + Q*) |
 | `/configurazione` | Impostazioni: base riparto, tipo/valore costi amm.vi |
 
