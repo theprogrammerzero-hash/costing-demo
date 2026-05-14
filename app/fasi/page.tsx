@@ -60,7 +60,7 @@ export default async function FasiPage() {
                     <span>{p.quantita.toLocaleString("it-IT")} pz</span>
                     {totOre > 0 && (
                       <span className="num font-medium text-ink">
-                        {totOre.toFixed(2)}h/pz tot.
+                        {Math.round(totOre * 60)} min/pz tot.
                       </span>
                     )}
                     <span>{faseProdotto.length} fasi</span>
@@ -76,7 +76,7 @@ export default async function FasiPage() {
                         <th className="px-4 py-2 text-left">Fase</th>
                         <th className="px-4 py-2 text-left">Reparto</th>
                         <th className="px-4 py-2 text-left">Macchina</th>
-                        <th className="px-4 py-2 text-right">h/pz</th>
+                        <th className="px-4 py-2 text-right">min/pz</th>
                         <th className="w-8"></th>
                       </tr>
                     </thead>
@@ -90,7 +90,7 @@ export default async function FasiPage() {
                             {f.macchina ? `${f.macchina.codice} — ${f.macchina.nome}` : "—"}
                           </td>
                           <td className="px-4 py-2 num font-medium text-right">
-                            {f.tempoOre.toFixed(2)}h
+                            {Math.round(f.tempoOre * 60)} min
                           </td>
                           <td className="px-2 py-1 text-right">
                             <form action={deleteFase.bind(null, f.id)} className="inline">
@@ -111,7 +111,7 @@ export default async function FasiPage() {
                         <tr className="text-xs text-ink-muted">
                           <td colSpan={4} className="px-4 py-1.5">Totale</td>
                           <td className="px-4 py-1.5 num font-medium text-right">
-                            {totOre.toFixed(2)}h/pz
+                            {Math.round(totOre * 60)} min/pz
                           </td>
                           <td></td>
                         </tr>
@@ -177,14 +177,14 @@ export default async function FasiPage() {
                     </div>
                     <div>
                       <label className="text-xxs uppercase tracking-wider text-ink-muted">
-                        Tempo (h/pz)
+                        Tempo (min/pz)
                       </label>
                       <input
-                        name="tempoOre"
+                        name="tempoMinuti"
                         type="number"
-                        step="0.01"
-                        min="0.01"
-                        placeholder="0.00"
+                        step="1"
+                        min="1"
+                        placeholder="30"
                         className="input mt-1 w-24 text-sm font-mono"
                         required
                       />
@@ -203,8 +203,8 @@ export default async function FasiPage() {
         <div className="border-l-2 border-ink pl-4 text-sm text-ink-muted max-w-xl">
           <p className="font-medium text-ink">Come inserire i tempi</p>
           <ul className="mt-1 space-y-1">
-            <li>Inserisci le ore per <strong>singolo pezzo</strong> (non per l&apos;intera commessa)</li>
-            <li>Esempio: 30 minuti per pezzo → <strong>0.50h</strong></li>
+            <li>Inserisci i <strong>minuti per singolo pezzo</strong> (non per l&apos;intera commessa)</li>
+            <li>Esempio: mezzora per pezzo → inserisci <strong>30</strong></li>
             <li>Più fasi nello stesso reparto vengono sommate automaticamente nel calcolo costi</li>
             <li>La macchina è opzionale — serve solo per l&apos;analisi del carico macchine</li>
           </ul>

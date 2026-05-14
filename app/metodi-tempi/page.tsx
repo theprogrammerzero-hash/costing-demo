@@ -111,8 +111,8 @@ export default async function MetodiTempiPage() {
                 </div>
                 <div className="flex items-center gap-5 text-sm">
                   <div className="text-right">
-                    <div className="text-xxs uppercase tracking-wider text-ink-muted">Ore tot./pz</div>
-                    <div className="num font-medium">{totOre.toFixed(2)}h</div>
+                    <div className="text-xxs uppercase tracking-wider text-ink-muted">Min tot./pz</div>
+                    <div className="num font-medium">{Math.round(totOre * 60)} min</div>
                   </div>
                   {taktTime != null && (
                     <div className="text-right">
@@ -138,10 +138,10 @@ export default async function MetodiTempiPage() {
                     <th className="px-3 py-2 text-left w-8">#</th>
                     <th className="px-3 py-2 text-left">Fase</th>
                     <th className="px-3 py-2 text-left">Reparto</th>
-                    <th className="px-3 py-2 text-right">h/pz std.</th>
+                    <th className="px-3 py-2 text-right">min/pz std.</th>
                     <th className="px-3 py-2 text-left">Operatore consigliato</th>
                     <th className="px-3 py-2 text-right">Eff.</th>
-                    <th className="px-3 py-2 text-right">h/pz eff.</th>
+                    <th className="px-3 py-2 text-right">min/pz eff.</th>
                     <th className="px-3 py-2 text-right">Costo MdO/u</th>
                   </tr>
                 </thead>
@@ -151,7 +151,7 @@ export default async function MetodiTempiPage() {
                       <td className="px-3 py-2 num text-ink-muted">{f.sequenza}</td>
                       <td className="px-3 py-2 font-medium">{f.nome}</td>
                       <td className="px-3 py-2 text-ink-muted text-xs">{f.reparto.nome}</td>
-                      <td className="px-3 py-2 num">{f.tempoOre.toFixed(2)}h</td>
+                      <td className="px-3 py-2 num">{Math.round(f.tempoOre * 60)} min</td>
                       <td className="px-3 py-2">
                         {noCopertura ? (
                           <span className="text-xs text-accent-neg font-medium">⚠ Nessun operatore qualificato</span>
@@ -168,7 +168,7 @@ export default async function MetodiTempiPage() {
                       </td>
                       <td className="px-3 py-2 num">
                         <span className={best && best.efficienzaPerc < 100 ? "num-neg" : ""}>
-                          {tempoEff.toFixed(2)}h
+                          {Math.round(tempoEff * 60)} min
                         </span>
                       </td>
                       <td className="px-3 py-2 num">
@@ -180,7 +180,7 @@ export default async function MetodiTempiPage() {
                 <tfoot>
                   <tr className="border-t border-line bg-paper font-medium text-xs">
                     <td colSpan={3} className="px-3 py-2 text-ink-muted">Totale commessa</td>
-                    <td className="px-3 py-2 num">{totOre.toFixed(2)}h</td>
+                    <td className="px-3 py-2 num">{Math.round(totOre * 60)} min</td>
                     <td colSpan={3}></td>
                     <td className="px-3 py-2 num">{costoMdoTotUnit > 0 ? fmtEur(costoMdoTotUnit) : "—"}</td>
                   </tr>

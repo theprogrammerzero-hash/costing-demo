@@ -168,8 +168,8 @@ export default async function RisultatiPage() {
                               <span className="ml-1 text-ink-subtle">· {f.repartoNome}</span>
                             </td>
                             <td className="px-3 py-1.5 text-ink-subtle">
-                              {f.tempoOre.toFixed(2)}h
-                              {kWh > 0 && ` × (⚡${fmtEur(kWh)} + MdO ${fmtEur(repartoInfo!.reparto.tariffaMdo)})`}
+                              {Math.round(f.tempoOre * 60)}min
+                              {kWh > 0 && ` × (⚡${fmtEur(kWh)} + MdO ${fmtEur(repartoInfo!.reparto.tariffaMdo)})/h`}
                             </td>
                             <td className="px-3 py-1.5 num">{fmtEur(totFase)}</td>
                           </tr>
